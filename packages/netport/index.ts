@@ -4,7 +4,7 @@ import { version } from "./package.json";
 import { spawn } from "child_process";
 
 type MessageType = {
-  type: string;
+  topic: string;
   payload?: {};
 };
 
@@ -16,61 +16,60 @@ const parser = new ArgumentParser();
   parser.add_argument("-P", "--port", {  help: "Port number of server", type: "int", default: 7953 });
   parser.add_argument("-R", "--reconnect", { help: "Try to reconnect server if closed", action: "store_true" });
   parser.add_argument("-O", "--stdout", { help: "Print stdout of command", action: "store_true" });
-  const group = parser.add_mutually_exclusive_group({ required: true });
-  group.add_argument('-t', '--topic', { help: 'Topic to subscribe (i.e. -T topic1 -T topic2)', action: 'append' });
-  group.add_argument('-a', '--all', { help: 'Subscribe all topics', action: 'store_true' });
+  const group = parser.add_mutually_exclusive_group();
+  group.add_argument('-T', '--topic', { help: 'Topic to subscribe (i.e. -T topic1 -T topic2)', action: 'append' });
+  group.add_argument('-A', '--all', { help: 'Subscribe all topics', action: 'store_true' });
   parser.add_argument("command", { help: "Command to run" });
 }
 
 const args = parser.parse_args();
 
-const target = spawn(args.command, [], { shell: true });
-
 async function connect() {
-  console.log("connect");
   const socket = new WebSocket(`ws://${args.host}:${args.port}`);
-  console.log("socket");
+  socket.on("error", (error) => console.error(error));
 
   await new Promise<void>((resolve) => {
     socket.on("open", () => {
-      socket.send(
-        JSON.stringify({
-          type: "$subscribe",
-          payload: args.all ? { all: true } : { topics: args.topic },
-        })
-      );
       resolve();
     });
   });
 
-  console.log("open");
+  socket.send(
+    JSON.stringify({
+      topic: "$subscribe",
+      payload: args.all ? { all: true } : { topics: args.topic ?? [] },
+    })
+  );
+
+  const target = spawn(args.command, [], { shell: true });
+  target.stderr.pipe(process.stderr);
 
   socket.on("message", (message) => {
-    process.stdin.write(message.toString());
-    process.stdin.flush();
+    target.stdin.write(message.toString() + "\n");
   });
 
-  process.stdout.on("data", (data) => {
-    console.log("data");
-    const text = data.toString();
-    if (args.stdout) {
-      console.log(text);
-    }
-    try {
-      const message = JSON.parse(text) as MessageType;
-      if (typeof message.type === "string") {
-        socket.send(text);
-      } else {
-        console.error("Invalid message type");
+  target.stdout.on("data", (data) => {
+    for (const text of data.toString().trim().split("\n")) {
+      if (args.stdout) {
+        console.log(text);
       }
-    } catch (e) {
-      console.error("Invalid message format");
+      try {
+        const message = JSON.parse(text) as MessageType;
+        if (typeof message.topic === "string") {
+          socket.send(text);
+        } else {
+          console.error("Invalid topic");
+        }
+      } catch (e) {
+        console.error("Invalid message format");
+      }
     }
   });
 
   const interval = setInterval(() => {
     if (target.exitCode !== null || target.pid === null) {
       console.log("exit");
+      clearInterval(interval);
       process.exit(target.exitCode ?? undefined);
     }
   }, 500);

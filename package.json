@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "nethub": "npx tsx ./packages/nethub/index.ts",
+    "netport": "npx tsx ./packages/netport/index.ts"
   },
   "author": "",
   "license": "ISC",
